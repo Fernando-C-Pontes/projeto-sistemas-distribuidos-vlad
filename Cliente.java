@@ -129,7 +129,9 @@ public class Cliente {
         Mensagem mensagem = new Mensagem("GET", key, null, timestamp, portaCliente);
         mensagem.setIp("127.0.0.1");
 
-        InetSocketAddress servidor = servidores.get(random.nextInt(servidores.size()));
+        // Forçar o GET sempre no líder (servidor[0])
+        InetSocketAddress servidor = servidores.get(0);
+
         try (Socket socket = new Socket(servidor.getAddress(), servidor.getPort());
             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
