@@ -127,48 +127,51 @@ public class Cliente {
     }
 
     // PUT
-    public void put(String key, String value) throws IOException {
+    // PUT corrigido:
+    public void put(String key, String value) throws IOException, ClassNotFoundException {
         hashTable.put(key, new Pair<>(value, 0));
         Mensagem mensagem = new Mensagem("PUT", key, value, 0, portaCliente);
-
-        // Define o IP correto do cliente
         mensagem.setIp("127.0.0.1");
 
         InetSocketAddress servidor = servidores.get(random.nextInt(servidores.size()));
         try (Socket socket = new Socket(servidor.getAddress(), servidor.getPort());
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+            ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
             out.writeObject(mensagem);
             out.flush();
-            System.out.println("PUT enviado para servidor [" + servidor + "]");
+
+            Mensagem resposta = (Mensagem) in.readObject();
+            if ("PUT_OK".equals(resposta.getType())) {
+                hashTable.put(key, new Pair<>(value, resposta.getTimestamp()));
+                System.out.println("PUT_OK key: [" + key + "] value [" + value + "] timestamp [" + resposta.getTimestamp() + "] realizada no servidor [" + resposta.getIp() + ":" + resposta.getPorta() + "]");
+            } else if ("FORWARDED".equals(resposta.getType())) {
+                System.out.println("PUT encaminhado ao líder. Aguardando PUT_OK via ListenerThread...");
+            }
         }
     }
 
     // GET
-    public void get(String key) throws IOException {
-        int timestamp = 0;
+    public void get(String key) throws IOException, ClassNotFoundException {
+        int timestamp = hashTable.getOrDefault(key, new Pair<>(null, 0)).second;
+        Mensagem mensagem = new Mensagem("GET", key, null, timestamp, portaCliente);
+        mensagem.setIp("127.0.0.1");
 
-        // Busca timestamp local da chave
-        if (hashTable.containsKey(key)) { // Se a chave existe, pega o timestamp
-            timestamp = hashTable.get(key).second;
-        } else { // Se a chave não existe, inicializa com timestamp 0
-            hashTable.put(key, new Pair<>(null, 0));
-        }
-        Mensagem mensagem = new Mensagem("GET", key, null, timestamp, portaCliente); // Cria mensagem GET
-
-        // Escolhe servidor aleatório
         InetSocketAddress servidor = servidores.get(random.nextInt(servidores.size()));
+        try (Socket socket = new Socket(servidor.getAddress(), servidor.getPort());
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+            ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
 
-        // Conecta e envia
-        Socket socket = new Socket(servidor.getAddress(), servidor.getPort()); 
-        ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+            out.writeObject(mensagem);
+            out.flush();
 
-        out.writeObject(mensagem);
-        out.flush();
-
-        System.out.println("GET enviado para servidor [" + servidor + "]");
-
-        out.close();
-        socket.close();
+            Mensagem resposta = (Mensagem) in.readObject();
+            if ("GET_RETURN".equals(resposta.getType())) {
+                hashTable.put(key, new Pair<>(resposta.getValue(), resposta.getTimestamp()));
+                System.out.println("GET key: [" + key + "] value: [" + resposta.getValue() + "] obtido do servidor [" + resposta.getIp() + ":" + resposta.getPorta() + "], meu timestamp [" + hashTable.get(key).second + "] e do servidor [" + resposta.getTimestamp() + "]");
+            } else if ("WAIT_FOR_RESPONSE".equals(resposta.getType())) {
+                System.out.println("GET key: [" + key + "] value: [WAIT_FOR_RESPONSE] obtido do servidor [" + resposta.getIp() + ":" + resposta.getPorta() + "], meu timestamp [" + timestamp + "] e do servidor [" + resposta.getTimestamp() + "]");
+            }
+        }
     }
 
     // Método main para executar o cliente
@@ -214,6 +217,7 @@ public class Cliente {
                 }
             } catch (Exception e) {
                 System.out.println("Erro: " + e.getMessage());
+                e.printStackTrace();
             }
         }
     }

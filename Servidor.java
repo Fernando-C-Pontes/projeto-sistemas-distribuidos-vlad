@@ -22,22 +22,6 @@ public class Servidor {
     }
 
     // Encaminhar PUT para líder
-    /*private Mensagem encaminharParaLider(Mensagem msg) {
-        try (Socket socket = new Socket(enderecoLider.getAddress(), enderecoLider.getPort()); ObjectOutputStream outLider = new ObjectOutputStream(socket.getOutputStream());
-            ObjectInputStream inLider = new ObjectInputStream(socket.getInputStream())) {
-
-            outLider.writeObject(msg);
-            outLider.flush();
-
-            // Aguarda resposta PUT_OK do líder
-            Mensagem resposta = (Mensagem) inLider.readObject();
-            System.out.println("Recebido PUT_OK do líder, repassando ao cliente.");
-            return resposta;
-        } catch (Exception e) {
-            System.out.println("Erro ao encaminhar PUT para líder: " + e.getMessage());
-            return null; // Retorna nulo se falhar
-        }
-    }*/
     private void encaminharParaLider(Mensagem msg) {
         try (
             Socket socket = new Socket(enderecoLider.getAddress(), enderecoLider.getPort());
@@ -45,7 +29,7 @@ public class Servidor {
         ) {
             outLider.writeObject(msg);
             outLider.flush();
-            // Não espera resposta!
+            Thread.sleep(100); // Pequena pausa para garantir que o líder receba a mensagem
             socket.close();
             System.out.println("PUT encaminhado ao líder, resposta será enviada pelo próprio líder ao cliente.");
         } catch (Exception e) {
@@ -88,15 +72,18 @@ public class Servidor {
         String value = msg.getValue();
 
         if (!souLider) {
-            // Seguidor: apenas encaminha para o líder e encerra
             System.out.println("Encaminhando PUT key:[" + key + "] value:[" + value + "]");
             encaminharParaLider(msg);
-            System.out.println("PUT encaminhado ao líder, resposta será enviada pelo próprio líder ao cliente.");
+            Mensagem forwarded = new Mensagem("FORWARDED", key, value, 0, porta);
+            forwarded.setIp(meuEndereco.getAddress().getHostAddress());
+            out.writeObject(forwarded);
+            out.flush();
+            System.out.println("Informando cliente que PUT foi encaminhado ao líder.");
             return;
         }
 
-        // Líder: processa normalmente
         System.out.println("Cliente [" + msg.getIp() + "]:" + msg.getPorta() + " PUT key:[" + key + "] value:[" + value + "].");
+
         int novoTimestamp;
         synchronized (hashTable) {
             if (hashTable.containsKey(key)) {
@@ -106,13 +93,20 @@ public class Servidor {
             }
             hashTable.put(key, new Pair<>(value, novoTimestamp));
         }
-        
-        // Replica para seguidores
+
         Mensagem replicationMsg = new Mensagem("REPLICATION", key, value, novoTimestamp, porta);
         replicationMsg.setIp(meuEndereco.getAddress().getHostAddress());
         enviarParaSeguidores(replicationMsg);
-        pendentes.put(key, new Pair<>(msg, 2)); // espera 2 REPLICATION_OK
+
+        pendentes.put(key, new Pair<>(msg, 2));
+
+        Mensagem resposta = new Mensagem("PUT_OK", key, value, novoTimestamp, porta);
+        resposta.setIp(meuEndereco.getAddress().getHostAddress());
+        out.writeObject(resposta);
+        out.flush();
+        System.out.println("Enviando PUT_OK ao Cliente [" + msg.getIp() + "]:" + msg.getPorta() + " da key:[" + key + "] ts:[" + novoTimestamp + "]");
     }
+
 
     // Trata requisição GET
     // Verifica se a chave existe e se o timestamp é válido
@@ -216,6 +210,7 @@ public class Servidor {
                 Socket socket = new Socket(originalPUT.getIp(), originalPUT.getPorta());
                 ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                 out.writeObject(resposta);
+                out.flush();
                 out.close();
                 socket.close();
                 System.out.println("Enviando PUT_OK ao Cliente [" + originalPUT.getIp() + "]:" + originalPUT.getPorta() + " da key:[" + key + "] ts:[" + hashTable.get(key).timestamp + "]");
@@ -302,6 +297,7 @@ public class Servidor {
                 }
                 in.close();
                 out.close();
+                Thread.sleep(100); // Pequena pausa para evitar sobrecarga
                 socket.close();
             } catch (Exception e) {
                 System.out.println("Erro ao tratar requisição: " + e.getMessage());
