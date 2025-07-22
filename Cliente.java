@@ -3,25 +3,21 @@ import java.util.*;
 import java.io.*;
  
 public class Cliente {
-    private List<InetSocketAddress> servidores; // Lista de servidores
-    private Map<String, Pair<String, Integer>> hashTable; // HashMap para armazenar chaves e seus valores com timestamp
-    private boolean inicializado; // Indica se o cliente foi inicializado
-    private Random random; // Para escolher servidores aleatórios
-    private int portaCliente; // Porta fixa do cliente para escutar respostas
+    private List<InetSocketAddress> servidores;
+    private Map<String, Pair<String, Integer>> hashTable;
+    private boolean inicializado;
+    private Random random;
+    private int portaCliente;
 
-    // Armazenar par de chave e timestamp
     private class Pair<F, S> {
-        public F first; // Valor da chave
-        public S second; // Timestamp da chave
-
-        // Construtor para inicializar o par
+        public F first;
+        public S second;
         public Pair(F first, S second) {
             this.first = first;
             this.second = second;
         }
     }
 
-    // LISTENER: Thread que escuta respostas dos servidores
     private class ListenerThread extends Thread {
         private int porta;
 
@@ -30,11 +26,8 @@ public class Cliente {
         }
 
         @Override 
-        // Método run que executa a lógica de escuta
         public void run() {
             try (ServerSocket serverSocket = new ServerSocket(porta)) {
-                System.out.println("Listener do cliente rodando na porta " + porta);
-
                 while (true) { 
                     Socket socket = serverSocket.accept();
                     ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
@@ -42,21 +35,16 @@ public class Cliente {
 
                     String key = msg.getKey();
                     int tsServidor = msg.getTimestamp();
-                    
+
                     switch (msg.getType()) { 
                         case "PUT_OK":
-                            // Atualiza timestamp local
-                            if (hashTable.containsKey(key)) {
-                                Pair<String, Integer> entry = hashTable.get(key);
-                                hashTable.put(key, new Pair<>(entry.first, tsServidor));
-                            }
+                            hashTable.put(key, new Pair<>(msg.getValue(), tsServidor));
                             System.out.println("PUT_OK key: [" + key + "] value [" +
                                     hashTable.get(key).first + "] timestamp [" + tsServidor +
                                     "] realizada no servidor [" + msg.getIp() + ":" + msg.getPorta() + "]");
                             break;
 
                         case "GET":
-                            // Atualiza value e timestamp
                             hashTable.put(key, new Pair<>(msg.getValue(), tsServidor));
                             System.out.println("GET key: [" + key + "] value: [" + msg.getValue() +
                                     "] obtido do servidor [" + msg.getIp() + ":" + msg.getPorta() +
@@ -67,48 +55,38 @@ public class Cliente {
                         case "WAIT_FOR_RESPONSE":
                             System.out.println("GET key: [" + key + "] value: [WAIT_FOR_RESPONSE] obtido do servidor [" +
                                     msg.getIp() + ":" + msg.getPorta() + "], meu timestamp [" +
-                                    hashTable.get(key).second + "] e do servidor [" + tsServidor + "]");
+                                    hashTable.getOrDefault(key, new Pair<>(null, 0)).second + "] e do servidor [" + tsServidor + "]");
                             break;
                     }
 
                     in.close();
                     socket.close();
                 }
-            }
-            catch (IOException | ClassNotFoundException e) {
-                System.out.println("Erro no listener do cliente: " + e.getMessage());
-            }
+            } catch (IOException | ClassNotFoundException e) {}
         }
     }
 
-    // Construtor do Cliente: Inicializa a lista de servidores, hashTable, estado, random e recebe a porta do cliente para escutar respostas
     public Cliente(int portaCliente) {
-        servidores = new ArrayList<>(); // Lista de servidores
-        hashTable = new HashMap<>(); // Armazenar value + timestamp 
-        inicializado = false; // Indica se o cliente foi inicializado
-        random = new Random(); // Para escolher servidores aleatórios
-        this.portaCliente = portaCliente; // Porta fixa do cliente para escutar respostas
+        servidores = new ArrayList<>();
+        hashTable = new HashMap<>();
+        inicializado = false;
+        random = new Random();
+        this.portaCliente = portaCliente;
     }
     
-    // Método para inicializar o cliente
     public void init() {
         @SuppressWarnings("resource")
         Scanner scanner = new Scanner(System.in);
-
-        // Permite escolher entre IPs/portas padrão ou inserção manual
         System.out.println("Selecione:\n1 - Usar IPs/portas padrão\n2 - Inserir manualmente");
         int opcao = Integer.parseInt(scanner.nextLine());
 
-        // Limpa a lista de servidores
         servidores.clear();
 
-        // Inicializa a lista de servidores com IPs e portas
-        if (opcao == 1) { // Usar IPs/portas padrão
+        if (opcao == 1) {
             for (int i = 0; i < 3; i++) {
                 servidores.add(new InetSocketAddress("127.0.0.1", 10097 + i));
             }
-        } 
-        else if (opcao == 2) { // Inserção manual de IPs e portas
+        } else if (opcao == 2) {
             for (int i = 1; i <= 3; i++) {
                 System.out.println("Digite o IP do servidor " + i + ": ");
                 String ip = scanner.nextLine();
@@ -116,27 +94,25 @@ public class Cliente {
                 int porta = Integer.parseInt(scanner.nextLine());
                 servidores.add(new InetSocketAddress(ip, porta));
             }
-        } 
-        else { // Opção inválida
+        } else {
             System.out.println("Opção inválida.");
             return;
         }
 
         inicializado = true; 
-        System.out.println("Cliente inicializado com sucesso.");
     }
 
-    // PUT
-    // PUT corrigido:
     public void put(String key, String value) throws IOException, ClassNotFoundException {
         hashTable.put(key, new Pair<>(value, 0));
         Mensagem mensagem = new Mensagem("PUT", key, value, 0, portaCliente);
         mensagem.setIp("127.0.0.1");
-
+        mensagem.setPorta(portaCliente);
+        
         InetSocketAddress servidor = servidores.get(random.nextInt(servidores.size()));
         try (Socket socket = new Socket(servidor.getAddress(), servidor.getPort());
             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+
             out.writeObject(mensagem);
             out.flush();
 
@@ -144,13 +120,10 @@ public class Cliente {
             if ("PUT_OK".equals(resposta.getType())) {
                 hashTable.put(key, new Pair<>(value, resposta.getTimestamp()));
                 System.out.println("PUT_OK key: [" + key + "] value [" + value + "] timestamp [" + resposta.getTimestamp() + "] realizada no servidor [" + resposta.getIp() + ":" + resposta.getPorta() + "]");
-            } else if ("FORWARDED".equals(resposta.getType())) {
-                System.out.println("PUT encaminhado ao líder. Aguardando PUT_OK via ListenerThread...");
             }
         }
     }
 
-    // GET
     public void get(String key) throws IOException, ClassNotFoundException {
         int timestamp = hashTable.getOrDefault(key, new Pair<>(null, 0)).second;
         Mensagem mensagem = new Mensagem("GET", key, null, timestamp, portaCliente);
@@ -174,7 +147,6 @@ public class Cliente {
         }
     }
 
-    // Método main para executar o cliente
     public static void main(String[] args) throws IOException {
         @SuppressWarnings("resource")
         Scanner scanner = new Scanner(System.in);
@@ -186,7 +158,6 @@ public class Cliente {
         ListenerThread listener = cliente.new ListenerThread(portaCliente);
         listener.start(); 
         
-        // Loop para interagir com o usuário
         while (true) {
             try {
                 System.out.println("O que deseja fazer?\n1 - INIT\n2 - PUT\n3 - GET");
@@ -217,7 +188,6 @@ public class Cliente {
                 }
             } catch (Exception e) {
                 System.out.println("Erro: " + e.getMessage());
-                e.printStackTrace();
             }
         }
     }
